@@ -1,6 +1,5 @@
 from Crypto.Cipher import AES
 import random
-import itertools
 
 pad = lambda s, b: s + (b - len(s) % b) * chr(b - len(s) % b)
 
