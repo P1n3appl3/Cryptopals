@@ -1,9 +1,4 @@
 import itertools
-from Crypto.Cipher import AES
-
-unpad = lambda s: s[:-ord(s[-1])]
-
-decryptECB = lambda s, k: unpad(AES.new(k, AES.MODE_ECB).decrypt(s))
 
 f = open("8.txt")
 data = f.read().splitlines()
