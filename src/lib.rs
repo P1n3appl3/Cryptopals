@@ -1,22 +1,14 @@
 #![feature(lazy_cell)]
 
-use std::{
-    fs,
-    io::{self, Read},
-    sync::LazyLock,
-};
+use std::{fs, sync::LazyLock};
 
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes128;
 use bitvec::prelude::*;
+use itertools::Itertools;
 
 pub type AesBlock = [u8; 16];
-
-pub fn get_input() -> String {
-    let mut buf = Vec::new();
-    io::stdin().read_to_end(&mut buf).expect("failed to read from stdin");
-    String::from_utf8(buf).expect("invalid utf8").trim().to_owned()
-}
+pub const BLOCK_SIZE: usize = 16;
 
 pub fn from_hex(hex: &str) -> Vec<u8> {
     assert!(hex.chars().all(|n| n.is_ascii_hexdigit()));
@@ -98,7 +90,7 @@ static EXPECTED_FREQ: LazyLock<[f32; 256]> = LazyLock::new(|| {
 
 pub fn break_xor(bytes: &[u8]) -> Vec<(f32, u8, Vec<u8>)> {
     let mut results = Vec::new();
-    for i in 0..u8::MAX {
+    for i in 0..=u8::MAX {
         let result: Vec<u8> = bytes.iter().map(|b| b ^ i).collect();
         let freq = byte_frequency(result.as_slice());
         let distance: f32 =
@@ -129,23 +121,26 @@ pub fn hamming_dist(a: &[u8], b: &[u8]) -> u32 {
     a.iter().zip(b).map(|(a, b)| (a ^ b).count_ones()).sum()
 }
 
-pub fn pad_pkcs(bytes: &[u8], len: usize) -> Vec<u8> {
-    let mut vec = Vec::from(bytes);
-    if bytes.len() < len {
-        let needed = len - bytes.len();
-        assert!(needed <= u8::MAX as usize);
-        vec.extend(std::iter::repeat(needed as u8).take(needed))
+pub fn detect_aes(bytes: &[u8]) -> bool {
+    for pair in bytes.chunks(BLOCK_SIZE).combinations(2) {
+        let &[a, b] = pair.as_slice() else {unreachable!()};
+        if a == b {
+            return true;
+        }
     }
-    vec
+    false
 }
 
-pub fn pad_for_aes(bytes: &mut Vec<u8>) {
-    let len = ((bytes.len() - 1) / 16 + 1) * 16;
-    if bytes.len() < len {
-        let needed = len - bytes.len();
-        assert!(needed <= u8::MAX as usize);
-        bytes.extend(std::iter::repeat(needed as u8).take(needed))
-    }
+pub fn padded(bytes: &[u8], len: usize) -> Vec<u8> {
+    let mut v = Vec::from(bytes);
+    pad(&mut v, len);
+    v
+}
+
+pub fn pad(bytes: &mut Vec<u8>, blocksize: usize) {
+    let needed = blocksize - bytes.len() % blocksize;
+    assert!(needed <= u8::MAX as usize);
+    bytes.extend(std::iter::repeat(needed as u8).take(needed))
 }
 
 pub fn unpad(bytes: &[u8]) -> &[u8] {
@@ -159,7 +154,7 @@ pub fn unpad(bytes: &[u8]) -> &[u8] {
 
 pub fn ecb_decrypt(bytes: &mut [u8], key: AesBlock) {
     let cipher = Aes128::new(&GenericArray::from(key));
-    for chunk in bytes.chunks_mut(16) {
+    for chunk in bytes.chunks_mut(BLOCK_SIZE) {
         let block = GenericArray::from_mut_slice(chunk);
         cipher.decrypt_block(block);
     }
@@ -167,7 +162,7 @@ pub fn ecb_decrypt(bytes: &mut [u8], key: AesBlock) {
 
 pub fn ecb_encrypt(bytes: &mut [u8], key: AesBlock) {
     let cipher = Aes128::new(&GenericArray::from(key));
-    for chunk in bytes.chunks_mut(16) {
+    for chunk in bytes.chunks_mut(BLOCK_SIZE) {
         let block = GenericArray::from_mut_slice(chunk);
         cipher.encrypt_block(block);
     }
@@ -176,8 +171,8 @@ pub fn ecb_encrypt(bytes: &mut [u8], key: AesBlock) {
 pub fn cbc_decrypt(bytes: &mut [u8], key: AesBlock, iv: AesBlock) {
     let cipher = Aes128::new(&GenericArray::from(key));
     let mut prev = iv;
-    for chunk in bytes.chunks_mut(16) {
-        let temp: [u8; 16] = chunk.try_into().unwrap();
+    for chunk in bytes.chunks_mut(BLOCK_SIZE) {
+        let temp: [u8; BLOCK_SIZE] = chunk.try_into().unwrap();
         let block = GenericArray::from_mut_slice(chunk);
         cipher.decrypt_block(block);
         chunk.iter_mut().zip(prev).for_each(|(a, b)| *a ^= b);
@@ -188,7 +183,7 @@ pub fn cbc_decrypt(bytes: &mut [u8], key: AesBlock, iv: AesBlock) {
 pub fn cbc_encrypt(bytes: &mut [u8], key: AesBlock, iv: AesBlock) {
     let cipher = Aes128::new(&GenericArray::from(key));
     let mut prev = iv;
-    for chunk in bytes.chunks_mut(16) {
+    for chunk in bytes.chunks_mut(BLOCK_SIZE) {
         chunk.iter_mut().zip(prev).for_each(|(a, b)| *a ^= b);
         let block = GenericArray::from_mut_slice(chunk);
         cipher.encrypt_block(block);
