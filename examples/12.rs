@@ -1,5 +1,6 @@
-use std::{mem, sync::OnceLock};
+use std::sync::OnceLock;
 
+use kdam::tqdm;
 use rand::prelude::*;
 
 use cryptopals::*;
@@ -18,7 +19,7 @@ fn oracle(bytes: &[u8]) -> Vec<u8> {
     data
 }
 
-fn detect_block_size() -> usize {
+fn len_and_block_size() -> (usize, usize) {
     let mut i = 2;
     let prev_len = oracle(b"A").len();
     let first_len;
@@ -35,33 +36,36 @@ fn detect_block_size() -> usize {
         let input = vec![b'A'; i];
         let len = oracle(&input).len();
         if len != first_len {
-            return i - start;
+            let block_size = i - start;
+            return (oracle(&[]).len() - start, block_size);
         }
         i += 1;
     }
 }
 
 fn main() {
-    let block_size = dbg!(detect_block_size());
+    let (secret_size, block_size) = len_and_block_size();
     assert!(detect_aes(&vec![b'A'; block_size * 3]));
-    let mut decoded = Vec::new();
-    for i in 1..100 {
-        let skip_blocks = i / block_size;
-        let idx = i % block_size;
-        let one_short = &oracle(&vec![b'A'; block_size * skip_blocks + block_size - idx])
-            [skip_blocks * block_size..(skip_blocks + 1) * block_size];
-        for b in 0..=u8::MAX {
-            let mut input = vec![b'A'; block_size];
-            input[block_size - idx] = b;
-            let output = oracle(&input);
-            if &output[skip_blocks * block_size..(skip_blocks + 1) * block_size]
-                == one_short
-            {
-                decoded.push(b);
-                println!("first byte: {b:#0x}");
+    let mut decoded = vec![b'A'; dbg!(block_size)];
+    let mut probe = decoded.clone();
+    for n in tqdm!(0..dbg!(secret_size)) {
+        let b = n / block_size;
+        let i = n % block_size;
+        if i == 0 {
+            probe = decoded.rchunks(block_size).next().unwrap().to_vec();
+        }
+        let one_short = &oracle(&probe[i + 1..])[b * block_size..(b + 1) * block_size];
+        for byte in 0..=u8::MAX {
+            let mut input = decoded.rchunks(block_size - 1).next().unwrap().to_vec();
+            input.push(byte);
+            if &oracle(&input)[..block_size] == one_short {
+                decoded.push(byte);
                 break;
             }
         }
+        if decoded.len() != n + block_size + 1 {
+            panic!("didn't add a byte");
+        }
     }
-    println!("{}", String::from_utf8_lossy(&decoded));
+    println!("{}", String::from_utf8_lossy(&decoded[block_size..]));
 }

@@ -191,6 +191,21 @@ pub fn cbc_encrypt(bytes: &mut [u8], key: AesBlock, iv: AesBlock) {
     }
 }
 
+pub fn pprint(bytes: &[u8]) {
+    let s: String = bytes
+        .iter()
+        .map(|b| match b {
+            b if b.is_ascii_alphanumeric() || b.is_ascii_punctuation() => {
+                (*b as char).to_string()
+            }
+            b'\n' => "⮒".to_owned(),
+            b' ' => "·".to_owned(),
+            b => format!("\\{{{b:0x}}}"),
+        })
+        .collect();
+    println!("{} : {} bytes", s, bytes.len());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
